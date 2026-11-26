@@ -1,0 +1,90 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: notification_mongodb
+    restart: unless-stopped
+    ports:
+      - "27018:27017"
+    environment:
+      MONGO_INITDB_DATABASE: notification_db
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        openssl rand -base64 756 > /tmp/keyfile
+        chmod 400 /tmp/keyfile
+        mongod --replSet rs0 --bind_ip_all &
+        MONGOPID=$$!
+        until mongosh --eval "db.adminCommand('ping')" > /dev/null 2>&1; do
+          sleep 1
+        done
+        mongosh --eval 'try { rs.initiate({_id: "rs0", members: [{_id: 0, host: "localhost:27017"}]}); } catch(e) {}'
+        wait $$MONGOPID
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "rs.status().ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: notification_redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    container_name: notification_rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5674:5672"
+      - "15674:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: notification_mailpit
+    restart: unless-stopped
+    ports:
+      - "1028:1025"
+      - "8028:8025"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: notification_app
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    environment:
+      PORT: 8082
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongodb:27017/notification_db?replicaSet=rs0
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      JWT_PUBLIC_KEY_PATH: /app/keys/public.pem
+      WEBHOOK_SECRET: dev-webhook-secret
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy

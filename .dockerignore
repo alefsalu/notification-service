@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+.git
+_PESSOAL
+.superpowers
+keys
+*.pem
+.env
+tests

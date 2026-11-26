@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+.env
+*.pem
+keys/
+_PESSOAL/
+.superpowers/
